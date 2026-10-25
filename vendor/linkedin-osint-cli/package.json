@@ -1,0 +1,86 @@
+{
+  "name": "@gnmike57/linkedin-osint-cli",
+  "version": "0.2.0",
+  "description": "CLI and MCP server for LinkedIn — 46 platform commands plus a 13-command OSINT suite (company discovery, employee scraping, username generation, role classification, org charts). Interactive shell, cookie-session auth, AI agent native.",
+  "type": "module",
+  "bin": {
+    "linkedin": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "assets/",
+    "README.md",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "smoke:menu": "node scripts/smoke-menu.mjs",
+    "smoke:shell": "node scripts/smoke-shell.mjs",
+    "smoke:mcp": "node scripts/smoke-mcp.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gnmike57/linkedin-osint-cli.git"
+  },
+  "homepage": "https://github.com/gnmike57/linkedin-osint-cli#readme",
+  "bugs": {
+    "url": "https://github.com/gnmike57/linkedin-osint-cli/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "commander": "^14.0.3",
+    "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "@inquirer/prompts": "^8.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.5",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^5.0.3"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
+  },
+  "keywords": [
+    "linkedin",
+    "cli",
+    "mcp",
+    "mcp-server",
+    "automation",
+    "voyager-api",
+    "agent",
+    "ai",
+    "linkedin-api",
+    "linkedin-automation",
+    "cookie-auth",
+    "social-media",
+    "osint",
+    "reconnaissance",
+    "org-chart",
+    "messaging",
+    "connections",
+    "posts",
+    "feed"
+  ],
+  "author": "Brandon Charleson",
+  "license": "MIT",
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}

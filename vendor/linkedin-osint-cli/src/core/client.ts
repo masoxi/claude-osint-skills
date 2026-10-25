@@ -1,0 +1,338 @@
+import { webcrypto } from 'node:crypto';
+import type { LinkedInAuth, LinkedInClient } from './types.js';
+import { httpRequest } from './transport.js';
+import { classifyLinkedInRedirect } from './redirects.js';
+import {
+  AuthError,
+  ChallengeError,
+  ForbiddenError,
+  LinkedInError,
+  NotFoundError,
+  RateLimitError,
+  ServerError,
+  ValidationError,
+} from './errors.js';
+
+const VOYAGER_BASE = 'https://www.linkedin.com/voyager/api';
+const LINKEDIN_BASE = 'https://www.linkedin.com';
+const MAX_RETRIES = 3;
+const TIMEOUT_MS = 30_000;
+const MIN_REQUEST_GAP_MS = 2_000;
+
+// Node 18 lacks the global `crypto` WebCrypto object — fall back to node:crypto
+const webCrypto = globalThis.crypto ?? (webcrypto as unknown as NonNullable<typeof globalThis.crypto>);
+
+/** Human-like delay to avoid rate limits (2-5s; 1ms under vitest) */
+function randomDelay(): Promise<void> {
+  const ms = process.env.VITEST ? 1 : 2000 + Math.random() * 3000;
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Generate a random tracking ID (16 random bytes, base64) */
+export function generateTrackingId(): string {
+  const bytes = new Uint8Array(16);
+  webCrypto.getRandomValues(bytes);
+  return Buffer.from(bytes).toString('base64');
+}
+
+/** Optional behaviour for {@link createClient}. */
+export interface ClientOptions {
+  /**
+   * Re-resolve the session on a mid-run auth failure and retry once, so the
+   * caller transparently recovers from an expired token instead of seeing a raw
+   * 401. The CLI passes a browser-profile refresh here.
+   */
+  refresh?: () => Promise<LinkedInAuth | null>;
+}
+
+/**
+ * True when a stored Cookie header belongs to the given session.
+ *
+ * A full jar **wins over** `li_at`/`JSESSIONID` when building request headers
+ * (LinkedIn ignores the thin pair when a jar is present, because it invalidates
+ * sessions that send only the two auth cookies). So a jar captured for an
+ * earlier session silently keeps the CLI on the OLD credentials, no matter how
+ * fresh `li_at` is. Matching the two identity cookies is what makes that
+ * impossible regardless of what is on disk.
+ *
+ * Returns true when the jar carries neither cookie — there is nothing to
+ * contradict, and callers require a `li_at=` in the jar before using it.
+ */
+export function jarBelongsToSession(
+  cookieHeader: string,
+  liAt: string,
+  jsessionid: string,
+): boolean {
+  const cookieValue = (name: string): string | undefined => {
+    const match = new RegExp(`(?:^|;\\s*)${name}=([^;]*)`).exec(cookieHeader);
+    return match ? match[1].trim().replace(/^"|"$/g, '') : undefined;
+  };
+  const strip = (value: string): string => value.trim().replace(/^"|"$/g, '');
+
+  const jarLiAt = cookieValue('li_at');
+  if (jarLiAt !== undefined && jarLiAt !== liAt) return false;
+
+  const jarJsessionid = cookieValue('JSESSIONID');
+  if (jarJsessionid !== undefined && jarJsessionid !== strip(jsessionid)) return false;
+
+  return true;
+}
+
+/** Warn at most once per process about a stale jar (not per request). */
+let warnedStaleJar = false;
+
+/** Build the cookie header for a given auth (replays the full jar when valid). */
+function cookieHeaderFor(csrfToken: string, auth: LinkedInAuth): string {
+  const jar = auth.cookieHeader;
+  if (jar && jar.includes('li_at=')) {
+    if (jarBelongsToSession(jar, auth.liAt, csrfToken)) return jar;
+    if (!warnedStaleJar) {
+      warnedStaleJar = true;
+      process.stderr.write(
+        '[auth] the stored cookie jar belongs to a different session than the ' +
+          'configured li_at/JSESSIONID — ignoring the jar so the fresh ' +
+          'credentials are used. Re-run `linkedin login` to refresh it.\n',
+      );
+    }
+  }
+  return `JSESSIONID="${csrfToken}"; li_at=${auth.liAt}`;
+}
+
+export function createClient(auth: LinkedInAuth, clientOptions?: ClientOptions): LinkedInClient {
+  let csrfToken = auth.jsessionid.replace(/"/g, '');
+  let cookieHeader = cookieHeaderFor(csrfToken, auth);
+
+  const baseHeaders: Record<string, string> = {
+    'csrf-token': csrfToken,
+    cookie: cookieHeader,
+    'user-agent':
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    accept: 'application/vnd.linkedin.normalized+json+2.1',
+    'accept-language': 'en-US,en;q=0.9',
+    'x-li-lang': 'en_US',
+    'x-restli-protocol-version': '2.0.0',
+    'x-li-track': JSON.stringify({
+      clientVersion: '1.13.36',
+      mpVersion: '1.13.36',
+      osName: 'web',
+      timezoneOffset: new Date().getTimezoneOffset() / -60,
+      deviceFormFactor: 'DESKTOP',
+      mpName: 'voyager-web',
+      displayDensity: 2,
+    }),
+    referer: 'https://www.linkedin.com/feed/',
+  };
+
+  let lastRequestTime = 0;
+  /**
+   * Serialize requests through a promise chain so concurrent callers (parallel
+   * fetches, MCP tool calls) still honor the minimum gap — otherwise N requests
+   * issued at once all pass the gap check and burst at LinkedIn.
+   */
+  let requestChain: Promise<unknown> = Promise.resolve();
+
+  async function performRequest<T = unknown>(options: {
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+    path: string;
+    query?: Record<string, string | number | boolean | undefined>;
+    body?: unknown;
+    baseRequest?: boolean;
+  }): Promise<T> {
+    // Rate limit: ensure minimum gap between requests
+    const now = Date.now();
+    const elapsed = now - lastRequestTime;
+    if (elapsed < MIN_REQUEST_GAP_MS) {
+      await new Promise((resolve) => setTimeout(resolve, MIN_REQUEST_GAP_MS - elapsed));
+    }
+
+    const base = options.baseRequest ? LINKEDIN_BASE : VOYAGER_BASE;
+    let url = `${base}${options.path}`;
+
+    if (options.query) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(options.query)) {
+        if (value !== undefined) {
+          params.set(key, String(value));
+        }
+      }
+      const qs = params.toString();
+      if (qs) url += `?${qs}`;
+    }
+
+    const headers: Record<string, string> = { ...baseHeaders };
+    if (options.body !== undefined) {
+      headers['content-type'] = 'application/json; charset=UTF-8';
+      headers['origin'] = LINKEDIN_BASE;
+    }
+
+    let lastError: Error | undefined;
+    let refreshed = false;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        // Use human-like random delay between retries instead of fixed backoff
+        await randomDelay();
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+        let response: Awaited<ReturnType<typeof httpRequest>>;
+        try {
+          response = await httpRequest(url, {
+            method: options.method,
+            headers,
+            body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+        lastRequestTime = Date.now();
+
+        const redirectError = classifyLinkedInRedirect(
+          response.status,
+          response.headers.get('location') ?? '',
+          url,
+        );
+        if (redirectError) {
+          throw redirectError;
+        }
+
+        const ok = response.status >= 200 && response.status < 300;
+
+        // Check for challenge / restricted page (only on non-OK responses)
+        const contentType = response.headers.get('content-type') ?? '';
+        if (!ok && contentType.includes('text/html')) {
+          throw new ChallengeError();
+        }
+
+        if (ok) {
+          // Some endpoints return 201 with no body
+          const text = await response.text();
+          if (!text) return {} as T;
+          try {
+            return JSON.parse(text) as T;
+          } catch {
+            return text as unknown as T;
+          }
+        }
+
+        const errorText = await response.text().catch(() => '');
+        let errorMessage = `LinkedIn API error: ${response.status}`;
+        try {
+          const parsed = JSON.parse(errorText);
+          errorMessage = parsed.message ?? parsed.errorMessage ?? errorMessage;
+        } catch {
+          if (errorText) errorMessage = errorText;
+        }
+
+        switch (response.status) {
+          case 401:
+            // Never retry auth errors — bail immediately
+            throw new AuthError('Session expired or invalid. Run: linkedin login');
+          case 403:
+            throw new ForbiddenError(errorMessage);
+          case 404:
+            throw new NotFoundError(errorMessage);
+          case 422:
+            throw new ValidationError(errorMessage);
+          case 429: {
+            const retryAfter = Number(response.headers.get('retry-after')) || undefined;
+            if (attempt < MAX_RETRIES) {
+              lastError = new RateLimitError(errorMessage, retryAfter);
+              continue;
+            }
+            throw new RateLimitError(errorMessage, retryAfter);
+          }
+          default:
+            if (response.status >= 500 && attempt < MAX_RETRIES) {
+              lastError = new ServerError(errorMessage, response.status);
+              continue;
+            }
+            if (response.status >= 500) {
+              throw new ServerError(errorMessage, response.status);
+            }
+            throw new LinkedInError(errorMessage, 'API_ERROR', response.status);
+        }
+      } catch (error) {
+        // Auth failure: transparently re-capture the session once, then retry
+        // so the caller never sees a raw 401. No-ops when no refresh is wired.
+        if (error instanceof AuthError && clientOptions?.refresh && !refreshed) {
+          refreshed = true;
+          const next = await clientOptions.refresh().catch(() => null);
+          if (next) {
+            csrfToken = next.jsessionid.replace(/"/g, '');
+            cookieHeader = cookieHeaderFor(csrfToken, next);
+            baseHeaders.cookie = cookieHeader;
+            baseHeaders['csrf-token'] = csrfToken;
+            headers.cookie = cookieHeader;
+            headers['csrf-token'] = csrfToken;
+            continue;
+          }
+        }
+        // Non-retryable errors: bail immediately
+        if (
+          error instanceof LinkedInError &&
+          !(error instanceof RateLimitError) &&
+          !(error instanceof ServerError)
+        ) {
+          throw error;
+        }
+        if (error instanceof TypeError && error.message.includes('fetch')) {
+          lastError = new LinkedInError('Network error: unable to connect', 'NETWORK_ERROR');
+          // Only idempotent GETs are safe to retry — a failed write may have
+          // executed server-side, and retrying it duplicates the write.
+          if (options.method === 'GET' && attempt < MAX_RETRIES) continue;
+          throw lastError;
+        }
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          lastError = new LinkedInError('Request timed out', 'TIMEOUT');
+          // Don't retry write timeouts
+          if (options.method !== 'GET' || attempt >= MAX_RETRIES) {
+            throw lastError;
+          }
+          continue;
+        }
+        if (error instanceof Error && !(error instanceof LinkedInError)) {
+          lastError = error;
+          if (options.method === 'GET' && attempt < MAX_RETRIES) continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError ?? new LinkedInError('Request failed after retries', 'MAX_RETRIES');
+  }
+
+  function request<T = unknown>(options: {
+    method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+    path: string;
+    query?: Record<string, string | number | boolean | undefined>;
+    body?: unknown;
+    baseRequest?: boolean;
+  }): Promise<T> {
+    const result = requestChain.then(() => performRequest<T>(options));
+    // Keep the chain alive regardless of individual request outcome
+    requestChain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  return {
+    request,
+    get: <T = unknown>(path: string, query?: Record<string, any>) =>
+      request<T>({ method: 'GET', path, query }),
+    post: <T = unknown>(path: string, body?: unknown, query?: Record<string, any>) =>
+      request<T>({ method: 'POST', path, query, body }),
+    patch: <T = unknown>(path: string, body?: unknown) =>
+      request<T>({ method: 'PATCH', path, body }),
+    put: <T = unknown>(path: string, body?: unknown) =>
+      request<T>({ method: 'PUT', path, body }),
+    delete: <T = unknown>(path: string, query?: Record<string, any>) =>
+      request<T>({ method: 'DELETE', path, query }),
+  };
+}
