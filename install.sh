@@ -172,6 +172,7 @@ PLIST
   fi
 
   node "$index_js" extension install >/dev/null 2>&1 || true
+  echo "Checking whether Chrome already sends your LinkedIn session (about 1 minute)..."
   sleep 70   # one extension send interval
   now="$(date +%s)"
   last="$(last_capture_epoch)"

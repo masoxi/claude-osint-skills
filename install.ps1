@@ -176,6 +176,7 @@ if ($Guided -and -not $SkipLinkedin -and (Test-Path $indexJs) -and (Have node)) 
     Write-Host "LinkedIn session receiver running, starts at every logon ($lnkPath)"
 
     Invoke-Native node @($indexJs, 'extension', 'install') -Quiet | Out-Null
+    Write-Host 'Checking whether Chrome already sends your LinkedIn session (about 1 minute)...'
     Start-Sleep -Seconds 70   # one extension send interval
     $last = Get-LastCapture
     if ($last -and ((Get-Date).ToUniversalTime() - $last).TotalMinutes -lt 2) {
