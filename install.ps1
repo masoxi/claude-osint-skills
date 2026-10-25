@@ -126,12 +126,34 @@ if (-not $SkipMcp) {
 # The CLI takes the LinkedIn session from the user's Chrome: the bundled
 # extension sends it to `linkedin extension listen` about once a minute. The
 # receiver runs hidden, now and at every logon (Startup folder shortcut).
-function Test-Listener { [bool](Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue) }
+# Chrome will not let any program open chrome://extensions, so the installer
+# opens LinkedIn in the Chrome profile that has (or will get) the extension,
+# plus a local setup page with copy buttons when the extension is missing.
 function Get-LastCapture {
     try {
         $list = (& node $indexJs sessions 2>$null) | ConvertFrom-Json
         $list.sessions | ForEach-Object { ([datetime]$_.last_seen).ToUniversalTime() } | Sort-Object -Descending | Select-Object -First 1
     } catch { $null }
+}
+
+# Chrome profile to use: the one that already has the extension loaded
+# (recorded in its Secure Preferences), else the profile used last.
+function Get-ChromeTarget {
+    $base = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data'
+    $names = @{}
+    $lastUsed = 'Default'
+    try {
+        $state = Get-Content (Join-Path $base 'Local State') -Raw | ConvertFrom-Json
+        if ($state.profile.last_used) { $lastUsed = $state.profile.last_used }
+        foreach ($p in $state.profile.info_cache.PSObject.Properties) { $names[$p.Name] = $p.Value.name }
+    } catch { }
+    $withExt = @(Get-ChildItem $base -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $prefs = Join-Path $_.FullName 'Secure Preferences'
+        (Test-Path $prefs) -and (Select-String -Path $prefs -SimpleMatch -Pattern 'linkedin-cli\\browser-extension' -Quiet)
+    } | ForEach-Object { $_.Name })
+    $dir = if ($withExt -contains $lastUsed) { $lastUsed } elseif ($withExt.Count) { $withExt[0] } else { $lastUsed }
+    $label = if ($names[$dir]) { $names[$dir] } else { $dir }
+    [pscustomobject]@{ Dir = $dir; Name = $label; HasExtension = [bool]$withExt.Count }
 }
 
 $extDir = Join-Path (Join-Path $env:USERPROFILE '.linkedin-cli') 'browser-extension'
@@ -146,46 +168,59 @@ if ($Guided -and -not $SkipLinkedin -and (Test-Path $indexJs) -and (Have node)) 
     $lnk.Arguments = $listenArgs
     $lnk.WindowStyle = 7
     $lnk.Save()
-    Write-Host "LinkedIn session receiver starts at every logon ($lnkPath)"
-    if (-not (Test-Listener)) {
-        Start-Process $powershell -ArgumentList $listenArgs -WindowStyle Hidden
-        Start-Sleep -Seconds 3
-    }
+    # Replace any running receiver so it always runs the build installed now.
+    Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'extension\s+listen' } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Process $powershell -ArgumentList $listenArgs -WindowStyle Hidden
+    Write-Host "LinkedIn session receiver running, starts at every logon ($lnkPath)"
 
     Invoke-Native node @($indexJs, 'extension', 'install') -Quiet | Out-Null
+    Start-Sleep -Seconds 70   # one extension send interval
     $last = Get-LastCapture
-    if ($last -and ((Get-Date).ToUniversalTime() - $last).TotalMinutes -lt 5) {
-        Write-Host 'LinkedIn: the Chrome extension already delivers the session.'
+    if ($last -and ((Get-Date).ToUniversalTime() - $last).TotalMinutes -lt 2) {
+        Write-Host 'LinkedIn: Chrome already delivers your session.'
         $linkedinReady = $true
     } else {
-        Write-Host ''
-        Write-Host 'LinkedIn login (once per computer):'
-        Write-Host '  1. In Chrome paste chrome://extensions into the address bar (already in your clipboard),'
-        Write-Host '     press Enter and switch on "Developer mode" (top right).'
-        Write-Host "  2. Click ""Load unpacked"" and choose the folder $extDir (also opened in Explorer)."
-        Write-Host '  3. Sign in to linkedin.com in Chrome.'
+        $target = Get-ChromeTarget
         $chrome = @(
             "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
             "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
             "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
         ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-        # Chrome refuses to open chrome:// pages from the command line, so the
-        # address goes to the clipboard and Chrome opens normally.
-        Set-Clipboard -Value 'chrome://extensions'
-        if ($chrome) { Start-Process $chrome } else { $todo.Add('Install Google Chrome for the LinkedIn login.') }
-        Start-Process explorer.exe $extDir
+        $urls = 'https://www.linkedin.com/feed/'
+        Write-Host ''
+        if ($target.HasExtension) {
+            Write-Host "LinkedIn login: Chrome opens LinkedIn in your profile '$($target.Name)' (it has the LinkedIn CLI extension)."
+            Write-Host '  - If you see the LinkedIn login page, sign in there.'
+            Write-Host '  - Then come back here and press Enter.'
+        } else {
+            $guide = ([Uri](Join-Path $repo 'setup\extension-setup.html')).AbsoluteUri + '#dir=' + [Uri]::EscapeDataString($extDir)
+            $urls = "$urls $guide"
+            Set-Clipboard -Value 'chrome://extensions'
+            Write-Host "LinkedIn login: Chrome opens your profile '$($target.Name)' with two tabs - LinkedIn and a setup page."
+            Write-Host '  - Follow the 4 steps on the setup page (load the extension once, sign in to LinkedIn).'
+            Write-Host '  - Then come back here and press Enter.'
+        }
+        if ($chrome) {
+            Start-Process $chrome -ArgumentList "--profile-directory=`"$($target.Dir)`" $urls"
+        } else {
+            $todo.Add('Install Google Chrome for the LinkedIn login.')
+        }
         $null = Read-Host 'Press Enter when done'
-        Write-Host 'Waiting for the extension to deliver the session (up to 3 minutes)...'
-        $since = (Get-Date).ToUniversalTime().AddMinutes(-1)
+        Write-Host 'Waiting for Chrome to deliver the session (up to 3 minutes)' -NoNewline
+        $since = (Get-Date).ToUniversalTime().AddSeconds(-90)
         for ($i = 0; $i -lt 18 -and -not $linkedinReady; $i++) {
             $last = Get-LastCapture
-            if ($last -and $last -gt $since) { $linkedinReady = $true } else { Start-Sleep -Seconds 10 }
+            if ($last -and $last -gt $since) { $linkedinReady = $true } else { Write-Host '.' -NoNewline; Start-Sleep -Seconds 10 }
+        }
+        Write-Host ''
+        if (-not $linkedinReady) {
+            $todo.Add("LinkedIn: no session from Chrome. In Chrome profile '$($target.Name)': sign in to linkedin.com, and in chrome://extensions make sure 'LinkedIn CLI' is loaded once and switched on (reload it). Then run this installer again or check: linkedin status --verify")
         }
     }
     if ($linkedinReady) {
         Invoke-Native node @($indexJs, 'status', '--verify') | Out-Null
-    } else {
-        $todo.Add("LinkedIn: no session from Chrome yet. Load the extension once from $extDir, sign in to LinkedIn in Chrome, wait a minute, then: linkedin status --verify")
     }
 }
 

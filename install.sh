@@ -105,7 +105,10 @@ fi
 # --- 4. LinkedIn login via Chrome (guided) ----------------------------------
 # The CLI takes the LinkedIn session from the user's Chrome: the bundled
 # extension sends it to `linkedin extension listen` about once a minute. On
-# macOS a LaunchAgent keeps the receiver running at every login.
+# macOS a LaunchAgent keeps the receiver running at every login. Chrome will
+# not let any program open chrome://extensions, so the installer opens
+# LinkedIn in the Chrome profile that has (or will get) the extension, plus a
+# local setup page with copy buttons when the extension is missing.
 last_capture_epoch() {
   node "$index_js" sessions 2>/dev/null | node -e '
     let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
@@ -114,9 +117,34 @@ last_capture_epoch() {
     });' 2>/dev/null || echo 0
 }
 
+# Prints "<profile dir>|<profile name>|<1 if it has the extension>": the
+# profile that already has the extension loaded, else the profile used last.
+chrome_target() {
+  CHROME_BASE="$HOME/Library/Application Support/Google/Chrome" node -e '
+    const fs = require("fs"), path = require("path");
+    const base = process.env.CHROME_BASE;
+    let names = {}, last = "Default";
+    try {
+      const st = JSON.parse(fs.readFileSync(path.join(base, "Local State"), "utf8"));
+      last = (st.profile && st.profile.last_used) || last;
+      for (const [k, v] of Object.entries((st.profile && st.profile.info_cache) || {})) names[k] = v.name;
+    } catch {}
+    let withExt = [];
+    try {
+      for (const d of fs.readdirSync(base)) {
+        const p = path.join(base, d, "Secure Preferences");
+        try { if (fs.readFileSync(p, "utf8").includes("linkedin-cli/browser-extension")) withExt.push(d); } catch {}
+      }
+    } catch {}
+    const dir = withExt.includes(last) ? last : (withExt[0] || last);
+    console.log([dir, names[dir] || dir, withExt.length ? 1 : 0].join("|"));
+  '
+}
+
 linkedin_ready=0
 if [ "$guided" = 1 ] && [ "$skip_linkedin" = 0 ] && [ -f "$index_js" ] && have node; then
   node_bin="$(command -v node)"
+  pkill -f "extension listen" >/dev/null 2>&1 || true
   if [ "$(uname)" = Darwin ]; then
     plist="$HOME/Library/LaunchAgents/com.claude-osint-skills.linkedin-listener.plist"
     mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.linkedin-cli"
@@ -137,45 +165,55 @@ if [ "$guided" = 1 ] && [ "$skip_linkedin" = 0 ] && [ -f "$index_js" ] && have n
 PLIST
     launchctl unload "$plist" >/dev/null 2>&1 || true
     launchctl load -w "$plist"
-    echo "LinkedIn session receiver runs at every login ($plist)"
+    echo "LinkedIn session receiver running, starts at every login ($plist)"
   else
-    todo+=("Keep 'linkedin extension listen' running (e.g. as a systemd user service) so Chrome can deliver the LinkedIn session.")
+    nohup "$node_bin" "$index_js" extension listen >"$HOME/.linkedin-cli/listener.log" 2>&1 &
+    todo+=("Linux: start 'linkedin extension listen' at login yourself (e.g. a systemd user service).")
   fi
 
   node "$index_js" extension install >/dev/null 2>&1 || true
+  sleep 70   # one extension send interval
   now="$(date +%s)"
   last="$(last_capture_epoch)"
-  if [ "$last" -gt 0 ] && [ $((now - last)) -lt 300 ]; then
-    echo "LinkedIn: the Chrome extension already delivers the session."
+  if [ "$last" -gt 0 ] && [ $((now - last)) -lt 120 ]; then
+    echo "LinkedIn: Chrome already delivers your session."
     linkedin_ready=1
   else
+    IFS='|' read -r profile_dir profile_name has_ext <<<"$(chrome_target)"
+    urls=("https://www.linkedin.com/feed/")
     echo
-    echo "LinkedIn login (once per computer):"
-    echo "  1. In Chrome paste chrome://extensions into the address bar (already in your clipboard),"
-    echo "     press Enter and switch on \"Developer mode\" (top right)."
-    echo "  2. Click \"Load unpacked\" and choose $ext_dir"
-    echo "     (opened in Finder too; in the file dialog press Cmd+Shift+. to show hidden folders)."
-    echo "  3. Sign in to linkedin.com in Chrome."
+    if [ "$has_ext" = 1 ]; then
+      echo "LinkedIn login: Chrome opens LinkedIn in your profile '$profile_name' (it has the LinkedIn CLI extension)."
+      echo "  - If you see the LinkedIn login page, sign in there."
+      echo "  - Then come back here and press Enter."
+    else
+      enc="$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$ext_dir")"
+      urls+=("file://$repo/setup/extension-setup.html#dir=$enc")
+      printf %s "chrome://extensions" | pbcopy 2>/dev/null || true
+      echo "LinkedIn login: Chrome opens your profile '$profile_name' with two tabs - LinkedIn and a setup page."
+      echo "  - Follow the 4 steps on the setup page (load the extension once, sign in to LinkedIn)."
+      echo "  - Then come back here and press Enter."
+    fi
     if [ "$(uname)" = Darwin ]; then
-      # Chrome refuses to open chrome:// pages from the command line, so the
-      # address goes to the clipboard and Chrome opens normally.
-      printf %s "chrome://extensions" | pbcopy
-      open -a "Google Chrome" >/dev/null 2>&1 || todo+=("Install Google Chrome for the LinkedIn login.")
-      open "$ext_dir" >/dev/null 2>&1 || true
+      open -na "Google Chrome" --args --profile-directory="$profile_dir" "${urls[@]}" >/dev/null 2>&1 \
+        || todo+=("Install Google Chrome for the LinkedIn login.")
     fi
     read -r -p "Press Enter when done " _ </dev/tty || true
-    echo "Waiting for the extension to deliver the session (up to 3 minutes)..."
-    since=$((now - 60))
+    printf "Waiting for Chrome to deliver the session (up to 3 minutes)"
+    since=$(( $(date +%s) - 90 ))
     for _ in $(seq 1 18); do
       last="$(last_capture_epoch)"
       if [ "$last" -gt "$since" ]; then linkedin_ready=1; break; fi
+      printf "."
       sleep 10
     done
+    echo
+    if [ "$linkedin_ready" = 0 ]; then
+      todo+=("LinkedIn: no session from Chrome. In Chrome profile '$profile_name': sign in to linkedin.com, and in chrome://extensions make sure 'LinkedIn CLI' is loaded once and switched on (reload it). Then run this installer again or check: linkedin status --verify")
+    fi
   fi
   if [ "$linkedin_ready" = 1 ]; then
     node "$index_js" status --verify || true
-  else
-    todo+=("LinkedIn: no session from Chrome yet. Load the extension once from $ext_dir, sign in to LinkedIn in Chrome, wait a minute, then: linkedin status --verify")
   fi
 fi
 

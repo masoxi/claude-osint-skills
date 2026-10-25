@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkedIn CLI extension – setup</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1d1d1f; --muted: #5f6368; --card: #f4f6f8; --line: #dadce0; --accent: #0a66c2; --ok: #137333; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1f1f1f; --fg: #e8eaed; --muted: #9aa0a6; --card: #2a2b2e; --line: #3c4043; --accent: #8ab4f8; --ok: #81c995; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  ol { list-style: none; padding: 0; margin: 0; counter-reset: step; }
+  li { counter-increment: step; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 16px 16px 60px; margin: 0 0 12px; position: relative; }
+  li::before { content: counter(step); position: absolute; left: 16px; top: 16px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 700; display: grid; place-items: center; }
+  li b { display: block; margin-bottom: 2px; }
+  .cs { color: var(--muted); font-size: 14px; display: block; }
+  .copy { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  code { flex: 1 1 260px; font: 14px/1.4 ui-monospace, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; user-select: all; }
+  button { font: inherit; font-size: 14px; border: 0; border-radius: 8px; padding: 8px 14px; background: var(--accent); color: var(--bg); cursor: pointer; }
+  button.done { background: var(--ok); }
+  .note { margin-top: 20px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Load the LinkedIn CLI extension</h1>
+  <p class="sub">One-time step — Chrome does not let installers add extensions automatically.<br>
+    <span class="cs">Jednorázový krok – Chrome nedovolí instalátoru přidat rozšíření sám.</span></p>
+  <ol>
+    <li><b>Open the extensions page in a new tab</b>
+      <span class="cs">Otevři novou kartu (Ctrl+T / Cmd+T), vlož adresu a stiskni Enter.</span>
+      <div class="copy"><code id="ext">chrome://extensions</code><button data-copy="ext">Copy</button></div>
+    </li>
+    <li><b>Switch on “Developer mode”</b> (top right)
+      <span class="cs">Vpravo nahoře zapni „Režim pro vývojáře“.</span>
+    </li>
+    <li><b>Click “Load unpacked” and choose this folder</b>
+      <span class="cs">Klikni „Načíst rozbalené“ a vyber tuto složku – v okně výběru stačí cestu vložit do pole s adresou.</span>
+      <div class="copy"><code id="dir">~/.linkedin-cli/browser-extension</code><button data-copy="dir">Copy</button></div>
+    </li>
+    <li><b>Sign in to LinkedIn in this Chrome profile</b>, then go back to the installer window and press Enter
+      <span class="cs">Přihlas se na LinkedIn v tomto profilu Chromu, pak se vrať do okna instalátoru a stiskni Enter.</span>
+    </li>
+  </ol>
+  <p class="note">Load the extension only once. It sends your Chrome LinkedIn session to the local receiver on this computer (127.0.0.1) about once a minute.<br>
+    Rozšíření nahraj jen jednou. Zhruba jednou za minutu předává přihlášení z Chromu přijímači na tomto počítači.</p>
+</main>
+<script>
+  const params = new URLSearchParams(location.hash.slice(1));
+  if (params.get('dir')) document.getElementById('dir').textContent = params.get('dir');
+  document.querySelectorAll('button[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const text = document.getElementById(button.dataset.copy).textContent;
+      try { await navigator.clipboard.writeText(text); }
+      catch {
+        const range = document.createRange();
+        range.selectNodeContents(document.getElementById(button.dataset.copy));
+        getSelection().removeAllRanges(); getSelection().addRange(range);
+        document.execCommand('copy');
+      }
+      button.textContent = 'Copied'; button.classList.add('done');
+      setTimeout(() => { button.textContent = 'Copy'; button.classList.remove('done'); }, 1500);
+    });
+  });
+</script>
+</body>
+</html>

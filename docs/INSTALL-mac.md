@@ -14,16 +14,22 @@ Když hlásí, že něco pořád chybí: zavři Terminál, otevři nový a spus�
 
 > Na Macu se instalátor zatím reálně nespouštěl. Když něco selže, ulož si výpis z Terminálu.
 
-## 2. Rozšíření v Chromu (jediný ruční krok)
+## 2. Přihlášení na LinkedIn v Chromu
 
-Instalátor otevře Chrome a adresu `chrome://extensions` dá do schránky – vlož ji do adresního řádku (Ctrl+V / Cmd+V) a stiskni Enter. Zároveň otevře ve Finderu složku `~/.linkedin-cli/browser-extension`.
+Instalátor sám pozná, ve kterém profilu Chromu máš rozšíření „LinkedIn CLI“, a otevře LinkedIn přímo v něm.
 
-1. V Chromu vpravo nahoře zapni **Režim pro vývojáře**.
-2. Klikni **Načíst rozbalené** a vyber tu složku. Je skrytá: v okně výběru ji ukážeš stiskem `Cmd+Shift+.`. Nahraj ji **jen jednou**.
-3. Přihlas se v Chromu na linkedin.com.
-4. Vrať se do Terminálu a stiskni **Enter**.
+**Rozšíření už máš:** otevře se LinkedIn ve správném profilu. Když uvidíš přihlašovací stránku, přihlas se. Pak se vrať do okna Terminálu a stiskni **Enter**.
 
-Instalátor počká, až rozšíření předá přihlášení (nejvýš 3 minuty), a ověří ho. Příjem přihlášení běží na pozadí a po každém přihlášení do Macu se spustí sám (LaunchAgent `com.claude-osint-skills.linkedin-listener`).
+**Rozšíření ještě nemáš (první instalace):** otevřou se dvě karty, LinkedIn a stránka s návodem. Postupuj podle ní:
+
+1. Tlačítkem **Copy** zkopíruj `chrome://extensions`, otevři novou kartu (Cmd+T), vlož adresu a stiskni Enter.
+2. Vpravo nahoře zapni **Režim pro vývojáře**.
+3. Klikni **Načíst rozbalené**. Tlačítkem **Copy** na stránce s návodem zkopíruj cestu ke složce (`~/.linkedin-cli/browser-extension`) a vlož ji do okna výběru (případně `Cmd+Shift+G`).
+4. Přihlas se na LinkedIn, vrať se do okna Terminálu a stiskni **Enter**.
+
+Chrome nedovolí žádnému programu otevřít stránku `chrome://extensions` ani nahrát rozšíření sám, proto je tenhle krok ruční. Stačí ho udělat jen jednou na počítači.
+
+Instalátor počká, až rozšíření předá přihlášení (nejvýš 3 minuty), a ověří ho. Když přihlášení nedorazí, vypíše, ve kterém profilu Chromu se máš přihlásit. Příjem přihlášení pak běží na pozadí a po každém přihlášení do Macu se spustí sám.
 
 ## 3. Ověř
 

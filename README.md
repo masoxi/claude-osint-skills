@@ -27,7 +27,7 @@ That one command:
 2. clones this repo to `~/claude-osint-skills` (set `CLAUDE_OSINT_DIR` to use another folder);
 3. links the `paro-osint` skill into `~/.claude/skills`, builds the LinkedIn CLI and registers the MCP servers `linkedin` and `openosint` for Claude Code;
 4. sets up the LinkedIn session receiver to start automatically at every logon;
-5. guides you through the **one manual step**: loading the bundled Chrome extension (Chrome does not allow installing it automatically);
+5. opens LinkedIn **in the Chrome profile that has the bundled extension** — or, if the extension is not loaded yet, that profile with a setup page (copy buttons, four short steps), because Chrome does not let installers add extensions;
 6. verifies the LinkedIn session and prints anything left to do.
 
 Then open a **new** session in Claude Code and ask *"what OSINT tools do I have?"*.
@@ -107,6 +107,7 @@ bootstrap.ps1 / bootstrap.sh   one-line installers (prerequisites + clone + inst
 install.ps1  / install.sh      the actual setup, re-runnable
 skills/paro-osint/             the Claude Code skill and its references
 vendor/linkedin-osint-cli/     fixed LinkedIn CLI + MCP server (MIT, tests: npx vitest run)
+setup/extension-setup.html     local page that walks through loading the Chrome extension
 claude/CLAUDE.md               global OSINT rules, installed when ~/.claude/CLAUDE.md does not exist
 docs/                          Czech step-by-step guides
 ```
@@ -135,17 +136,14 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/masoxi/claude-osint-skil
 
 Příkaz sám doinstaluje, co chybí (Git, Node.js, uv, Claude Code, Chrome), stáhne repo do `~/claude-osint-skills`, napojí skill `paro-osint` a zaregistruje MCP servery `linkedin` a `openosint`. Windows se může zeptat na povolení instalace, potvrď. Když instalátor hlásí, že něco chybí, otevři nové okno a spusť příkaz znovu.
 
-### Jediný ruční krok: rozšíření v Chromu
+### Přihlášení na LinkedIn
 
-Když instalátor napíše *LinkedIn login* a otevře Chrome:
+Instalátor sám pozná, ve kterém profilu Chromu máš rozšíření „LinkedIn CLI“, a otevře LinkedIn přímo v něm.
 
-1. Do adresního řádku Chromu vlož `chrome://extensions` (je ve schránce, Ctrl+V / Cmd+V) a stiskni Enter.
-2. Vpravo nahoře zapni **Režim pro vývojáře**.
-3. Klikni **Načíst rozbalené** a vyber složku `.linkedin-cli\browser-extension` ve své domovské složce (instalátor ji otevře; na Macu skryté složky ukážeš `Cmd+Shift+.`). Pokud tam rozšíření „LinkedIn CLI“ už máš, jen ho znovu načti (↻). Nahrané má být **jen jednou**.
-4. Přihlas se v Chromu na linkedin.com.
-5. V okně instalátoru stiskni **Enter**. Instalátor počká, až rozšíření předá přihlášení, a ověří ho.
+- **Rozšíření už máš:** otevře se LinkedIn. Když uvidíš přihlašovací stránku, přihlas se. Pak v okně instalátoru stiskni **Enter**.
+- **Rozšíření ještě nemáš:** otevřou se dvě karty, LinkedIn a stránka s návodem. Na ní jsou čtyři kroky s tlačítky „Copy“: otevřít `chrome://extensions`, zapnout **Režim pro vývojáře**, kliknout **Načíst rozbalené** a vybrat složku, přihlásit se na LinkedIn. Pak v okně instalátoru stiskni **Enter**.
 
-Příjem přihlášení se pak spouští sám po každém startu počítače. Dokud jsi v Chromu přihlášený na LinkedIn, přihlášení se obnovuje samo.
+Instalátor počká, až přihlášení dorazí, a ověří ho. Když nedorazí, napíše proč. Nejčastěji nejsi v tom profilu Chromu přihlášený na LinkedIn, nebo je rozšíření vypnuté.
 
 ### Ověření
 
