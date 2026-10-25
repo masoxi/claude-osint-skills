@@ -52,7 +52,9 @@
     try {
         if (Test-Path (Join-Path $dir '.git')) {
             Write-Host "Updating $dir ..."
-            & git -C $dir pull --ff-only | Out-Host
+            # safe.directory: a clone made from an elevated window is owned by
+            # Administrators, which git otherwise refuses in a normal window.
+            & git -c "safe.directory=$($dir -replace '\\', '/')" -C $dir pull --ff-only | Out-Host
         } else {
             Write-Host "Downloading claude-osint-skills to $dir ..."
             & git clone $repoUrl $dir | Out-Host
