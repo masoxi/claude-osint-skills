@@ -16,7 +16,7 @@ Když hlásí, že něco pořád chybí: zavři Terminál, otevři nový a spus�
 
 ## 2. Rozšíření v Chromu (jediný ruční krok)
 
-Instalátor otevře Chrome na stránce `chrome://extensions` a ve Finderu složku `~/.linkedin-cli/browser-extension`.
+Instalátor otevře Chrome a adresu `chrome://extensions` dá do schránky – vlož ji do adresního řádku (Ctrl+V / Cmd+V) a stiskni Enter. Zároveň otevře ve Finderu složku `~/.linkedin-cli/browser-extension`.
 
 1. V Chromu vpravo nahoře zapni **Režim pro vývojáře**.
 2. Klikni **Načíst rozbalené** a vyber tu složku. Je skrytá: v okně výběru ji ukážeš stiskem `Cmd+Shift+.`. Nahraj ji **jen jednou**.

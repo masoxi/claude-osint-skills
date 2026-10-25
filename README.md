@@ -27,14 +27,14 @@ Příkaz:
 2. stáhne repo do `~/claude-osint-skills` (jinam: proměnná `CLAUDE_OSINT_DIR`);
 3. napojí skill do `~/.claude/skills`, sestaví LinkedIn nástroj a zaregistruje MCP servery `linkedin` a `openosint`;
 4. nastaví příjem přihlášení z LinkedIn, aby se spouštěl sám po startu počítače;
-5. otevře Chrome na `chrome://extensions` a složku rozšíření – **tady uděláš jedinou ruční věc** (viz níže);
+5. otevře Chrome (adresu `chrome://extensions` dá do schránky) a složku rozšíření – **tady uděláš jedinou ruční věc** (viz níže);
 6. ověří přihlášení a vypíše, co případně zbývá.
 
 Postup krok za krokem: [Windows](docs/INSTALL-windows.md) · [Mac](docs/INSTALL-mac.md)
 
 ### Jediný ruční krok: rozšíření v Chromu
 
-Chrome nedovolí nahrát rozšíření automaticky. Když instalátor otevře `chrome://extensions`:
+Chrome nedovolí nahrát rozšíření automaticky. Když instalátor otevře Chrome, vlož do adresního řádku `chrome://extensions` (je ve schránce) a:
 
 1. vpravo nahoře zapni **Režim pro vývojáře**,
 2. klikni **Načíst rozbalené** a vyber složku `~/.linkedin-cli/browser-extension` (instalátor ji otevře; na Macu skryté složky ukážeš `Cmd+Shift+.`),

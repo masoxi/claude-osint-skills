@@ -151,12 +151,16 @@ PLIST
   else
     echo
     echo "LinkedIn login (once per computer):"
-    echo "  1. Chrome opens chrome://extensions - switch on \"Developer mode\" (top right)."
+    echo "  1. In Chrome paste chrome://extensions into the address bar (already in your clipboard),"
+    echo "     press Enter and switch on \"Developer mode\" (top right)."
     echo "  2. Click \"Load unpacked\" and choose $ext_dir"
     echo "     (opened in Finder too; in the file dialog press Cmd+Shift+. to show hidden folders)."
     echo "  3. Sign in to linkedin.com in Chrome."
     if [ "$(uname)" = Darwin ]; then
-      open -a "Google Chrome" "chrome://extensions" >/dev/null 2>&1 || todo+=("Install Google Chrome for the LinkedIn login.")
+      # Chrome refuses to open chrome:// pages from the command line, so the
+      # address goes to the clipboard and Chrome opens normally.
+      printf %s "chrome://extensions" | pbcopy
+      open -a "Google Chrome" >/dev/null 2>&1 || todo+=("Install Google Chrome for the LinkedIn login.")
       open "$ext_dir" >/dev/null 2>&1 || true
     fi
     read -r -p "Press Enter when done " _ </dev/tty || true

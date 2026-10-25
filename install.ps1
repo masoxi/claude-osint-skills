@@ -160,7 +160,8 @@ if ($Guided -and -not $SkipLinkedin -and (Test-Path $indexJs) -and (Have node)) 
     } else {
         Write-Host ''
         Write-Host 'LinkedIn login (once per computer):'
-        Write-Host '  1. Chrome opens chrome://extensions - switch on "Developer mode" (top right).'
+        Write-Host '  1. In Chrome paste chrome://extensions into the address bar (already in your clipboard),'
+        Write-Host '     press Enter and switch on "Developer mode" (top right).'
         Write-Host "  2. Click ""Load unpacked"" and choose the folder $extDir (also opened in Explorer)."
         Write-Host '  3. Sign in to linkedin.com in Chrome.'
         $chrome = @(
@@ -168,7 +169,10 @@ if ($Guided -and -not $SkipLinkedin -and (Test-Path $indexJs) -and (Have node)) 
             "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
             "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
         ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-        if ($chrome) { Start-Process $chrome 'chrome://extensions' } else { $todo.Add('Install Google Chrome for the LinkedIn login.') }
+        # Chrome refuses to open chrome:// pages from the command line, so the
+        # address goes to the clipboard and Chrome opens normally.
+        Set-Clipboard -Value 'chrome://extensions'
+        if ($chrome) { Start-Process $chrome } else { $todo.Add('Install Google Chrome for the LinkedIn login.') }
         Start-Process explorer.exe $extDir
         $null = Read-Host 'Press Enter when done'
         Write-Host 'Waiting for the extension to deliver the session (up to 3 minutes)...'
